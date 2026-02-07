@@ -52,19 +52,43 @@
             return sdp.replace(/useinbandfec=1/g, fmtp);
         }
 
-async function init() {
-    try {
-        // 余計な設定をすべて捨て、ブラウザのデフォルトに任せる
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+// マイク初期化（自動フォールバック機能付き）
+        async function init() {
+            try {
+                // まずは「最高音質」を目指してリクエスト
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false, 
+                        noiseSuppression: false, 
+                        autoGainControl: false,
+                        // 'ideal' を使うと「できればこうしたいけど、無理なら合わせるよ」という指示になる
+                        channelCount: { ideal: 2 }, 
+                        sampleRate: { ideal: 48000 } 
+                    }
+                });
+                
+                statusDiv.innerText = "準備OK！(高音質モード)";
+                statusDiv.style.color = "#00ff00"; // 緑色
+                startBtn.disabled = false; // ボタンを有効化
+
+            } catch (err) {
+                console.warn("高音質モード失敗。標準設定で再試行します...", err);
+                
+                // 高音質がダメなら、標準設定で再トライ（とにかく繋ぐことを優先）
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    statusDiv.innerText = "準備OK (標準モード)";
+                    statusDiv.style.color = "orange";
+                    startBtn.disabled = false; // ボタンを有効化
+                } catch (finalErr) {
+                    statusDiv.innerText = "エラー: マイクが見つからないか、許可されていません。";
+                    statusDiv.style.color = "red";
+                    console.error("マイク取得エラー:", finalErr);
+                }
+            }
+        }
+
         
-        statusDiv.innerText = "準備完了！";
-        startBtn.disabled = false;
-        console.log("Mic connected!");
-    } catch (err) {
-        statusDiv.innerText = "エラー: " + err.name;
-        console.error(err);
-    }
-}
 
         // 通信の確立処理
         function createPeerConnection() {
@@ -120,5 +144,14 @@ async function init() {
         socket.on('candidate', async (candidate) => {
             if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
         });
+socket.on('candidate', async (candidate) => {
+            if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        });
+
+        // この一行が足りなかったためにマイクが起動していませんでした
+        init();
+    </script>
+</body>
+</html>
 
 
