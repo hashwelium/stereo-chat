@@ -1,61 +1,97 @@
-const socket = io();
-const startBtn = document.getElementById('startBtn');
-const remoteAudio = document.getElementById('remoteAudio');
-let pc;
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Stereo P2P Call</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 50px; background: #f4f4f9; }
+        #status { color: #666; margin-bottom: 20px; font-weight: bold; }
+        button { padding: 15px 30px; font-size: 18px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        button:disabled { background: #ccc; }
+        audio { margin-top: 30px; display: block; width: 100%; max-width: 400px; margin-left: auto; margin-right: auto; }
+    </style>
+</head>
+<body>
+    <h1>Stereo WebRTC</h1>
+    <div id="status">マイクを許可してください...</div>
+    <button id="startBtn" disabled>通話開始 (Call)</button>
+    <audio id="remoteAudio" autoplay controls></audio>
 
-// 相手からのシグナルを受け取った時のログを追加
-socket.on('offer', async (offer) => {
-    console.log('Offer received');
-    if (!pc) preparePC();
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await pc.createAnswer();
-    answer.sdp = forceStereo(answer.sdp);
-    await pc.setLocalDescription(answer);
-    socket.emit('answer', answer);
-});
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const startBtn = document.getElementById('startBtn');
+        const statusDiv = document.getElementById('status');
+        const remoteAudio = document.getElementById('remoteAudio');
+        
+        let localStream;
+        let pc;
+        const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-async function preparePC() {
-    pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    
-    pc.onicecandidate = (e) => {
-        if (e.candidate) {
-            console.log('Sending candidate');
-            socket.emit('candidate', e.candidate);
+        // ステレオ強制設定
+        function forceStereo(sdp) {
+            return sdp.replace('useinbandfec=1', 'useinbandfec=1;stereo=1;maxaveragebitrate=128000');
         }
-    };
 
-    pc.ontrack = (e) => {
-        console.log('Stream received!');
-        remoteAudio.srcObject = e.streams[0];
-    };
+        // 起動時にマイクを準備
+        async function init() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 }
+                });
+                statusDiv.innerText = "準備完了。相手を待つか、通話を開始してください。";
+                startBtn.disabled = false;
+            } catch (err) {
+                statusDiv.innerText = "エラー: マイクにアクセスできません。";
+                console.error(err);
+            }
+        }
 
-    const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, channelCount: 2 }
-    });
-    
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
-}
+        function createPeerConnection() {
+            pc = new RTCPeerConnection(config);
 
-function forceStereo(sdp) {
-    return sdp.replace('useinbandfec=1', 'useinbandfec=1;stereo=1;maxaveragebitrate=128000');
-}
+            pc.onicecandidate = (e) => {
+                if (e.candidate) socket.emit('candidate', e.candidate);
+            };
 
-startBtn.onclick = async () => {
-    console.log('Starting call...');
-    await preparePC();
-    const offer = await pc.createOffer();
-    offer.sdp = forceStereo(offer.sdp);
-    await pc.setLocalDescription(offer);
-    socket.emit('offer', offer);
-    startBtn.innerText = "接続試行中...";
-};
+            pc.ontrack = (e) => {
+                statusDiv.innerText = "通話中 (Stereo Connected)";
+                remoteAudio.srcObject = e.streams[0];
+            };
 
-// AnswerとCandidateの受信も追加
-socket.on('answer', async (answer) => {
-    console.log('Answer received');
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-});
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+        }
 
-socket.on('candidate', async (candidate) => {
-    if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
-});
+        // 発信ボタン
+        startBtn.onclick = async () => {
+            createPeerConnection();
+            const offer = await pc.createOffer();
+            offer.sdp = forceStereo(offer.sdp);
+            await pc.setLocalDescription(offer);
+            socket.emit('offer', offer);
+            statusDiv.innerText = "呼び出し中...";
+        };
+
+        // 着信処理
+        socket.on('offer', async (offer) => {
+            if (!pc) createPeerConnection();
+            statusDiv.innerText = "着信中...";
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            answer.sdp = forceStereo(answer.sdp);
+            await pc.setLocalDescription(answer);
+            socket.emit('answer', answer);
+        });
+
+        socket.on('answer', async (answer) => {
+            await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        });
+
+        socket.on('candidate', async (candidate) => {
+            if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        });
+
+        init();
+    </script>
+</body>
+</html>
