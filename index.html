@@ -1,40 +1,112 @@
 <!DOCTYPE html>
 <html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Stereo Voice Chat</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      background: #0f172a;
+      color: white;
+      margin-top: 100px;
+    }
+    button {
+      padding: 15px 30px;
+      font-size: 18px;
+      border-radius: 10px;
+      border: none;
+      background: #38bdf8;
+      color: black;
+      cursor: pointer;
+    }
+  </style>
+</head>
 <body>
-<button onclick="startCall()">通話開始</button>
-<audio id="remoteAudio" autoplay></audio>
 
+<h1>🎧 Stereo Voice Chat</h1>
+<button id="startBtn">通話開始</button>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
-const ws = new WebSocket("https://stereo-chat.onrender.com");
-let pc;
+const socket = io("https://YOUR-RENDER-URL");
 
-async function startCall() {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  pc = new RTCPeerConnection();
-  stream.getTracks().forEach(track => pc.addTrack(track, stream));
-  pc.ontrack = e => remoteAudio.srcObject = e.streams[0];
+let localStream;
+let peerConnection;
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  ws.send(JSON.stringify({ offer }));
+const config = {
+  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+};
+
+async function getStereoStream() {
+  return await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 2,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false
+    }
+  });
 }
 
-ws.onmessage = async msg => {
-  const data = JSON.parse(msg.data);
-  if (data.offer) {
-    pc = new RTCPeerConnection();
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
-    pc.ontrack = e => remoteAudio.srcObject = e.streams[0];
+document.getElementById("startBtn").onclick = async () => {
+  localStream = await getStereoStream();
 
-    await pc.setRemoteDescription(data.offer);
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    ws.send(JSON.stringify({ answer }));
-  }
-  if (data.answer) await pc.setRemoteDescription(data.answer);
+  peerConnection = new RTCPeerConnection(config);
+
+  localStream.getTracks().forEach(track => {
+    peerConnection.addTrack(track, localStream);
+  });
+
+  peerConnection.ontrack = event => {
+    const audio = document.createElement("audio");
+    audio.srcObject = event.streams[0];
+    audio.autoplay = true;
+    document.body.appendChild(audio);
+  };
+
+  peerConnection.onicecandidate = event => {
+    if (event.candidate) {
+      socket.emit("ice-candidate", event.candidate);
+    }
+  };
+
+  const offer = await peerConnection.createOffer();
+  await peerConnection.setLocalDescription(offer);
+  socket.emit("offer", offer);
 };
+
+socket.on("offer", async offer => {
+  peerConnection = new RTCPeerConnection(config);
+
+  localStream = await getStereoStream();
+  localStream.getTracks().forEach(track => {
+    peerConnection.addTrack(track, localStream);
+  });
+
+  peerConnection.ontrack = event => {
+    const audio = document.createElement("audio");
+    audio.srcObject = event.streams[0];
+    audio.autoplay = true;
+    document.body.appendChild(audio);
+  };
+
+  await peerConnection.setRemoteDescription(offer);
+  const answer = await peerConnection.createAnswer();
+  await peerConnection.setLocalDescription(answer);
+  socket.emit("answer", answer);
+});
+
+socket.on("answer", async answer => {
+  await peerConnection.setRemoteDescription(answer);
+});
+
+socket.on("ice-candidate", async candidate => {
+  if (peerConnection) {
+    await peerConnection.addIceCandidate(candidate);
+  }
+});
 </script>
+
 </body>
 </html>
-
