@@ -1,6 +1,7 @@
 {
-  "name": "webrtc-server",
+  "name": "stereo-webrtc",
   "version": "1.0.0",
+  "description": "Stereo Audio Call via WebRTC",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
