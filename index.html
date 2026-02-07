@@ -200,8 +200,18 @@
             if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
         });
 
+// 1ピクセル×1ピクセルの見えない「無音」を生成して再生し続ける
+function keepAlive() {
+    const audio = new Audio();
+    // 非常に短い無音のデータURL（Base64）
+    audio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==";
+    audio.loop = true;
+    audio.play().catch(e => console.log("Auto-play blocked, waiting for user interaction"));
+}
+        
         init();
     </script>
 </body>
 </html>
+
 
