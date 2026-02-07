@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<body>
+<button onclick="startCall()">通話開始</button>
+<audio id="remoteAudio" autoplay></audio>
+
+<script>
+const ws = new WebSocket("wss://stereo-chat.onrender.com");
+let pc;
+
+async function startCall() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  pc = new RTCPeerConnection();
+  stream.getTracks().forEach(track => pc.addTrack(track, stream));
+  pc.ontrack = e => remoteAudio.srcObject = e.streams[0];
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  ws.send(JSON.stringify({ offer }));
+}
+
+ws.onmessage = async msg => {
+  const data = JSON.parse(msg.data);
+  if (data.offer) {
+    pc = new RTCPeerConnection();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    pc.ontrack = e => remoteAudio.srcObject = e.streams[0];
+
+    await pc.setRemoteDescription(data.offer);
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    ws.send(JSON.stringify({ answer }));
+  }
+  if (data.answer) await pc.setRemoteDescription(data.answer);
+};
+</script>
+</body>
+</html>
