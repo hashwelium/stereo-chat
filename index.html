@@ -34,22 +34,41 @@
             { urls: 'stun:stun2.l.google.com:19302' }
         ]};
 
-        function forceStereo(sdp) {
-            return sdp.replace('useinbandfec=1', 'useinbandfec=1;stereo=1;maxaveragebitrate=128000');
+function forceStereo(sdp) {
+    // 変更点: 
+    // maxaveragebitrate=510000 (ビットレートを510kbpsに爆上げ)
+    // sprop-maxcapturerate=48000 (サンプリングレートを48kHzに固定)
+    // usedtx=0 (無音時のデータ節約を無効化＝音が途切れない)
+    // stereo=1 (ステレオ強制)
+    let fmtp = "useinbandfec=1; stereo=1; maxaveragebitrate=510000; sprop-maxcapturerate=48000; usedtx=0";
+    return sdp.replace('useinbandfec=1', fmtp);
+}
         }
 
-        async function init() {
-            try {
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 }
-                });
-                statusDiv.innerText = "準備完了！相手もこのページを開いてください。";
-                startBtn.disabled = false;
-            } catch (err) {
-                statusDiv.innerText = "エラー: マイクにアクセスできません。";
-                console.error(err);
+async function init() {
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: false, // エコーキャンセルOFF（超重要）
+                noiseSuppression: false, // ノイズ除去OFF（環境音を残す）
+                autoGainControl: false,  // 音量自動調整OFF（ダイナミクスを守る）
+                channelCount: 2,         // ステレオ入力
+                sampleRate: 48000,       // 48kHzサンプリング（CD音質以上）
+                sampleSize: 16           // 16bit深度
             }
-        }
+        });
+        statusDiv.innerText = "高音質モード準備完了！";
+        startBtn.disabled = false;
+        
+        // 実際に適用された設定をログで確認
+        const track = localStream.getAudioTracks()[0];
+        console.log("適用された設定:", track.getSettings());
+
+    } catch (err) {
+        statusDiv.innerText = "エラー: マイク設定に失敗しました。";
+        console.error(err);
+    }
+}
 
         function createPeerConnection() {
             pc = new RTCPeerConnection(config);
@@ -107,6 +126,7 @@
     </script>
 </body>
 </html>
+
 
 
 
