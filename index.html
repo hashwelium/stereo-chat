@@ -1,14 +1,72 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Stereo Call</title>
+<style>
+body {
+  margin:0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: linear-gradient(135deg,#1e1e2f,#12121a);
+  color:white;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  height:100vh;
+}
+.card{
+  width:340px;
+  background:#1f1f2e;
+  border-radius:18px;
+  padding:24px;
+  box-shadow:0 10px 30px rgba(0,0,0,.5);
+  text-align:center;
+}
+h1{font-size:20px;margin-bottom:8px;}
+.status{opacity:.7;font-size:14px;margin-bottom:12px;}
+.timer{font-size:28px;margin:12px 0;font-weight:bold;}
+button{
+  width:100%;
+  padding:12px;
+  border:none;
+  border-radius:12px;
+  font-size:16px;
+  margin-top:8px;
+  cursor:pointer;
+}
+.start{background:#4CAF50;color:white;}
+.stop{background:#e53935;color:white;}
+textarea{
+  width:100%;
+  height:80px;
+  margin-top:8px;
+  border-radius:10px;
+  border:none;
+  padding:8px;
+  font-size:12px;
+}
+</style>
+</head>
 <body>
-<h2>Stereo WebRTC Test</h2>
-<button onclick="start()">Start</button>
-<pre id="log"></pre>
+<div class="card">
+  <h1>🎧 Stereo Voice Call</h1>
+  <div class="status" id="status">待機中</div>
+  <div class="timer" id="timer">00:00</div>
+  <button class="start" onclick="startCall()">通話開始</button>
+  <button class="stop" onclick="endCall()">終了</button>
+  <textarea id="offer" placeholder="Offer / Answer貼り付け"></textarea>
+</div>
 
 <script>
-let pc;
+let pc, localStream, timerInterval, seconds=0;
 
-function log(t){ document.getElementById("log").textContent += t + "\n"; }
+function updateTimer(){
+  seconds++;
+  const m = String(Math.floor(seconds/60)).padStart(2,'0');
+  const s = String(seconds%60).padStart(2,'0');
+  document.getElementById("timer").textContent = `${m}:${s}`;
+}
 
 function enableStereo(sdp){
   return sdp.replace(
@@ -17,8 +75,10 @@ function enableStereo(sdp){
   );
 }
 
-async function start(){
-  const stream = await navigator.mediaDevices.getUserMedia({
+async function startCall(){
+  document.getElementById("status").textContent="マイク取得中…";
+
+  localStream = await navigator.mediaDevices.getUserMedia({
     audio:{
       channelCount:2,
       sampleRate:48000,
@@ -29,7 +89,7 @@ async function start(){
   });
 
   pc = new RTCPeerConnection();
-  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+  localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
 
   pc.ontrack = e=>{
     const audio = new Audio();
@@ -37,9 +97,39 @@ async function start(){
     audio.play();
   };
 
+  pc.onconnectionstatechange=()=>{
+    document.getElementById("status").textContent="接続状態: "+pc.connectionState;
+    if(pc.connectionState==="connected"){
+      timerInterval=setInterval(updateTimer,1000);
+    }
+  };
+
   const offer = await pc.createOffer();
   await pc.setLocalDescription({type:"offer", sdp: enableStereo(offer.sdp)});
-  log("Stereo offer created");
+  document.getElementById("offer").value = JSON.stringify(pc.localDescription);
+  document.getElementById("status").textContent="Offer生成 → 相手へ送信";
+}
+
+async function setRemote(){
+  const data = JSON.parse(document.getElementById("offer").value);
+  await pc.setRemoteDescription(data);
+
+  if(data.type==="offer"){
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription({type:"answer", sdp: enableStereo(answer.sdp)});
+    document.getElementById("offer").value = JSON.stringify(pc.localDescription);
+    document.getElementById("status").textContent="Answer生成 → 返送";
+  }
+}
+
+document.getElementById("offer").addEventListener("change", setRemote);
+
+function endCall(){
+  if(pc) pc.close();
+  clearInterval(timerInterval);
+  seconds=0;
+  document.getElementById("timer").textContent="00:00";
+  document.getElementById("status").textContent="終了";
 }
 </script>
 </body>
