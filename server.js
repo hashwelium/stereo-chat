@@ -1,32 +1,17 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-
+const express = require('express');
 const app = express();
-const server = http.createServer(app);
+const http = require('http').createServer(app);
+const io = require('socket.io')(http);
 
-app.get("/", (req, res) => {
-  res.send("Server is running");
-});
+app.use(express.static('public'));
 
-const io = new Server(server, {
-  cors: { origin: "*" }
-});
+io.on('connection', (socket) => {
+    console.log('User connected:', socket.id);
 
-io.on("connection", (socket) => {
-  console.log("User connected");
-
-  socket.on("offer", data => socket.broadcast.emit("offer", data));
-  socket.on("answer", data => socket.broadcast.emit("answer", data));
-  socket.on("ice-candidate", data => socket.broadcast.emit("ice-candidate", data));
-
-  socket.on("disconnect", () => console.log("User disconnected"));
+    socket.on('offer', (data) => socket.broadcast.emit('offer', data));
+    socket.on('answer', (data) => socket.broadcast.emit('answer', data));
+    socket.on('candidate', (data) => socket.broadcast.emit('candidate', data));
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log("Server running on port " + PORT);
-});
-
-
-
+http.listen(PORT, () => console.log(`Server running on port ${PORT}`));
