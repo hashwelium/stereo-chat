@@ -8,7 +8,7 @@ const io = require('socket.io')(http, {
   }
 });
 
-app.use(express.static('public'));
+app.use(express.static(__dirname));
 
 io.on('connection', (socket) => {
     socket.on('offer', (data) => socket.broadcast.emit('offer', data));
@@ -18,3 +18,4 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
