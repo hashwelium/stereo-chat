@@ -25,7 +25,7 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
         // RenderのURLでSocket接続（自動判別）
-        const socket = io(); 
+  const socket = io("https://stereo-chat.onrender.com");
         
         const startBtn = document.getElementById('startBtn');
         const statusDiv = document.getElementById('status');
@@ -153,5 +153,6 @@ socket.on('candidate', async (candidate) => {
     </script>
 </body>
 </html>
+
 
 
