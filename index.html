@@ -5,15 +5,15 @@
     <title>Stereo P2P Call</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 50px; background: #f4f4f9; }
-        #status { color: #666; margin-bottom: 20px; font-weight: bold; }
-        button { padding: 15px 30px; font-size: 18px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+        #status { color: #007bff; margin-bottom: 20px; font-weight: bold; min-height: 1.2em; }
+        button { padding: 15px 30px; font-size: 18px; cursor: pointer; background: #28a745; color: white; border: none; border-radius: 5px; }
         button:disabled { background: #ccc; }
-        audio { margin-top: 30px; display: block; width: 100%; max-width: 400px; margin-left: auto; margin-right: auto; }
+        audio { margin-top: 30px; width: 100%; max-width: 400px; border-radius: 10px; }
     </style>
 </head>
 <body>
     <h1>Stereo WebRTC</h1>
-    <div id="status">マイクを許可してください...</div>
+    <div id="status">マイクを起動中...</div>
     <button id="startBtn" disabled>通話開始 (Call)</button>
     <audio id="remoteAudio" autoplay controls></audio>
 
@@ -26,82 +26,86 @@
         
         let localStream;
         let pc;
-        const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+        // 接続先を見つけるためのサーバーリスト
+        const config = { iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' }
+        ]};
 
-        // ステレオ強制設定
         function forceStereo(sdp) {
             return sdp.replace('useinbandfec=1', 'useinbandfec=1;stereo=1;maxaveragebitrate=128000');
         }
 
-        // 起動時にマイクを準備
-      async function init() {
+        async function init() {
             try {
-                // まずは一般的な設定でマイクを要求
                 localStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: false,
-                        noiseSuppression: false,
-                        autoGainControl: false
-                        // channelCountはあえてここでは指定せず、後で適用する
-                    }
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 }
                 });
-                
-                statusDiv.innerText = "準備完了。通話を開始してください。";
+                statusDiv.innerText = "準備完了！相手もこのページを開いてください。";
                 startBtn.disabled = false;
-                console.log("Microphone access granted:", localStream.getAudioTracks()[0].getSettings());
             } catch (err) {
-                statusDiv.innerText = "エラー: マイクが見つからないか許可されていません。";
-                console.error("Mic Error:", err);
+                statusDiv.innerText = "エラー: マイクにアクセスできません。";
+                console.error(err);
             }
         }
 
         function createPeerConnection() {
             pc = new RTCPeerConnection(config);
+            console.log("PeerConnection作成");
 
             pc.onicecandidate = (e) => {
-                if (e.candidate) socket.emit('candidate', e.candidate);
+                if (e.candidate) {
+                    console.log("Candidate送信");
+                    socket.emit('candidate', e.candidate);
+                }
             };
 
             pc.ontrack = (e) => {
-                statusDiv.innerText = "通話中 (Stereo Connected)";
+                console.log("音声を受信しました！");
+                statusDiv.innerText = "通話中 (Stereo Mode)";
                 remoteAudio.srcObject = e.streams[0];
             };
 
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
         }
 
-        // 発信ボタン
         startBtn.onclick = async () => {
-            createPeerConnection();
+            if (!pc) createPeerConnection();
             const offer = await pc.createOffer();
             offer.sdp = forceStereo(offer.sdp);
             await pc.setLocalDescription(offer);
             socket.emit('offer', offer);
-            statusDiv.innerText = "呼び出し中...";
+            statusDiv.innerText = "相手の応答を待っています...";
+            startBtn.disabled = true;
         };
 
-        // 着信処理
         socket.on('offer', async (offer) => {
+            console.log("Offer着信");
             if (!pc) createPeerConnection();
-            statusDiv.innerText = "着信中...";
             await pc.setRemoteDescription(new RTCSessionDescription(offer));
             const answer = await pc.createAnswer();
             answer.sdp = forceStereo(answer.sdp);
             await pc.setLocalDescription(answer);
             socket.emit('answer', answer);
+            statusDiv.innerText = "接続されました！";
         });
 
         socket.on('answer', async (answer) => {
+            console.log("Answer受信");
             await pc.setRemoteDescription(new RTCSessionDescription(answer));
         });
 
         socket.on('candidate', async (candidate) => {
-            if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            try {
+                if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (e) { console.error("ICEエラー", e); }
         });
 
         init();
     </script>
 </body>
 </html>
+
 
 
