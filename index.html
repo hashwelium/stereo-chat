@@ -1,92 +1,46 @@
-<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<!DOCTYPE html>
+<html>
+<body>
+<h2>Stereo WebRTC Test</h2>
+<button onclick="start()">Start</button>
+<pre id="log"></pre>
+
 <script>
-const socket = io("https://YOUR-RENDER-URL");
+let pc;
 
-let localStream;
-let peerConnection;
+function log(t){ document.getElementById("log").textContent += t + "\n"; }
 
-const config = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject"
-    }
-  ]
-};
+function enableStereo(sdp){
+  return sdp.replace(
+    /a=fmtp:111 minptime=10;useinbandfec=1/g,
+    "a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1"
+  );
+}
 
-async function getStereoStream() {
+async function start(){
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      channelCount: 2,
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false
+    audio:{
+      channelCount:2,
+      sampleRate:48000,
+      echoCancellation:false,
+      noiseSuppression:false,
+      autoGainControl:false
     }
   });
-  console.log("🎤 マイク取得:", stream.getAudioTracks());
-  return stream;
-}
 
-function createPeer() {
-  const pc = new RTCPeerConnection(config);
+  pc = new RTCPeerConnection();
+  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
 
-  pc.ontrack = (event) => {
-    console.log("🔊 相手の音声受信");
-    const audio = document.createElement("audio");
-    audio.srcObject = event.streams[0];
-    audio.autoplay = true;
-    audio.controls = true;
-    audio.onloadedmetadata = () => {
-      audio.play().catch(e => console.log("再生ブロック", e));
-    };
-    document.body.appendChild(audio);
+  pc.ontrack = e=>{
+    const audio = new Audio();
+    audio.srcObject = e.streams[0];
+    audio.play();
   };
 
-  pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      socket.emit("ice-candidate", event.candidate);
-    }
-  };
-
-  return pc;
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription({type:"offer", sdp: enableStereo(offer.sdp)});
+  log("Stereo offer created");
 }
-
-document.getElementById("startBtn").onclick = async () => {
-  localStream = await getStereoStream();
-  peerConnection = createPeer();
-
-  localStream.getTracks().forEach(track => {
-    peerConnection.addTrack(track, localStream);
-  });
-
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
-  socket.emit("offer", offer);
-};
-
-socket.on("offer", async offer => {
-  peerConnection = createPeer();
-  localStream = await getStereoStream();
-
-  localStream.getTracks().forEach(track => {
-    peerConnection.addTrack(track, localStream);
-  });
-
-  await peerConnection.setRemoteDescription(offer);
-  const answer = await peerConnection.createAnswer();
-  await peerConnection.setLocalDescription(answer);
-  socket.emit("answer", answer);
-});
-
-socket.on("answer", async answer => {
-  await peerConnection.setRemoteDescription(answer);
-});
-
-socket.on("ice-candidate", async candidate => {
-  if (peerConnection) {
-    await peerConnection.addIceCandidate(candidate);
-  }
-});
 </script>
+</body>
+</html>
