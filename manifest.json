@@ -1,0 +1,16 @@
+{
+  "short_name": "StereoCall",
+  "name": "High-Res Stereo Call",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/5948/5948503.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#222222",
+  "background_color": "#222222"
+}
