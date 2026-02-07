@@ -1,67 +1,61 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Stereo P2P Call</title>
-    <style>body { font-family: sans-serif; text-align: center; padding: 20px; }</style>
-</head>
-<body>
-    <h1>Stereo WebRTC Call</h1>
-    <button id="startBtn">通話開始 (Start Call)</button>
-    <audio id="remoteAudio" autoplay controls></audio>
+const socket = io();
+const startBtn = document.getElementById('startBtn');
+const remoteAudio = document.getElementById('remoteAudio');
+let pc;
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        const socket = io();
-        const startBtn = document.getElementById('startBtn');
-        const remoteAudio = document.getElementById('remoteAudio');
-        let pc;
+// 相手からのシグナルを受け取った時のログを追加
+socket.on('offer', async (offer) => {
+    console.log('Offer received');
+    if (!pc) preparePC();
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pc.createAnswer();
+    answer.sdp = forceStereo(answer.sdp);
+    await pc.setLocalDescription(answer);
+    socket.emit('answer', answer);
+});
 
-        // ステレオを強制するマジック
-        function forceStereo(sdp) {
-            return sdp.replace('useinbandfec=1', 'useinbandfec=1;stereo=1;maxaveragebitrate=128000');
+async function preparePC() {
+    pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    
+    pc.onicecandidate = (e) => {
+        if (e.candidate) {
+            console.log('Sending candidate');
+            socket.emit('candidate', e.candidate);
         }
+    };
 
-        async function start() {
-            pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    pc.ontrack = (e) => {
+        console.log('Stream received!');
+        remoteAudio.srcObject = e.streams[0];
+    };
 
-            pc.onicecandidate = (e) => {
-                if (e.candidate) socket.emit('candidate', e.candidate);
-            };
+    const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, channelCount: 2 }
+    });
+    
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+}
 
-            pc.ontrack = (e) => {
-                remoteAudio.srcObject = e.streams[0];
-            };
+function forceStereo(sdp) {
+    return sdp.replace('useinbandfec=1', 'useinbandfec=1;stereo=1;maxaveragebitrate=128000');
+}
 
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: { echoCancellation: false, noiseSuppression: false, channelCount: 2 }
-            });
-            
-            stream.getTracks().forEach(track => pc.addTrack(track, stream));
+startBtn.onclick = async () => {
+    console.log('Starting call...');
+    await preparePC();
+    const offer = await pc.createOffer();
+    offer.sdp = forceStereo(offer.sdp);
+    await pc.setLocalDescription(offer);
+    socket.emit('offer', offer);
+    startBtn.innerText = "接続試行中...";
+};
 
-            const offer = await pc.createOffer();
-            offer.sdp = forceStereo(offer.sdp);
-            await pc.setLocalDescription(offer);
-            socket.emit('offer', offer);
-        }
+// AnswerとCandidateの受信も追加
+socket.on('answer', async (answer) => {
+    console.log('Answer received');
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+});
 
-        socket.on('offer', async (offer) => {
-            if (!pc) await start();
-            await pc.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await pc.createAnswer();
-            answer.sdp = forceStereo(answer.sdp);
-            await pc.setLocalDescription(answer);
-            socket.emit('answer', answer);
-        });
-
-        socket.on('answer', async (answer) => {
-            await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        });
-
-        socket.on('candidate', async (candidate) => {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        });
-
-        startBtn.onclick = start;
-    </script>
-</body>
-</html>
+socket.on('candidate', async (candidate) => {
+    if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
+});
