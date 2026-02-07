@@ -3,156 +3,195 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>High Quality Stereo Call</title>
+    <title>High Quality Stereo Call Pro</title>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background: #222; color: #fff; }
         h1 { margin-bottom: 10px; font-size: 24px; }
         #status { color: #00ff00; margin-bottom: 20px; font-weight: bold; min-height: 1.5em; }
-        button { padding: 15px 40px; font-size: 18px; cursor: pointer; background: #ff4757; color: white; border: none; border-radius: 30px; transition: 0.3s; }
-        button:disabled { background: #555; cursor: not-allowed; }
-        button:hover:not(:disabled) { background: #ff6b81; }
-        audio { margin-top: 30px; width: 100%; max-width: 500px; border-radius: 10px; outline: none; }
-        .note { font-size: 0.8rem; color: #aaa; margin-top: 10px; }
+        
+        .controls { display: flex; justify-content: center; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        button { padding: 12px 25px; font-size: 16px; cursor: pointer; color: white; border: none; border-radius: 25px; transition: 0.3s; }
+        
+        #startBtn { background: #ff4757; }
+        #startBtn:disabled { background: #555; }
+        
+        #muteBtn { background: #ffa500; }
+        #hangupBtn { background: #777; }
+        
+        .boost-panel { 
+            margin: 20px auto; max-width: 320px; background: #333; 
+            padding: 15px; border-radius: 15px; border: 1px solid #444;
+        }
+        input[type="range"] { width: 100%; cursor: pointer; }
+        
+        audio { display: none; } /* 音量はWeb Audioで制御するため隠す */
+        .note { font-size: 0.8rem; color: #aaa; margin-top: 15px; }
     </style>
 </head>
 <body>
-    <h1>Stereo WebRTC (Hi-Res)</h1>
+    <h1>Stereo Call (Hi-Res & Boost)</h1>
     <div id="status">マイクを準備中...</div>
-    <button id="startBtn" disabled>通話開始 (Start)</button>
-    <div class="note">⚠️ ハウリング防止のため、必ずイヤホンをしてください</div>
-    <audio id="remoteAudio" autoplay controls></audio>
+    
+    <div class="controls">
+        <button id="startBtn" disabled>通話開始</button>
+        <button id="muteBtn">マイクON</button>
+        <button id="hangupBtn" disabled>通話終了</button>
+    </div>
+
+    <div class="boost-panel">
+        <label>🔊 受信音量ブースト: <span id="gainValue">1.0</span>倍</label><br>
+        <input type="range" id="gainRange" min="1" max="5" step="0.1" value="1">
+    </div>
+
+    <div class="note">⚠️ ハウリング防止のためイヤホン必須</div>
+    <audio id="remoteAudio" autoplay></audio>
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        // RenderのURLでSocket接続（自動判別）
-  const socket = io("https://stereo-chat.onrender.com");
+        const socket = io("https://stereo-chat.onrender.com"); // URLを確認してください
         
         const startBtn = document.getElementById('startBtn');
+        const muteBtn = document.getElementById('muteBtn');
+        const hangupBtn = document.getElementById('hangupBtn');
         const statusDiv = document.getElementById('status');
         const remoteAudio = document.getElementById('remoteAudio');
-        
+        const gainRange = document.getElementById('gainRange');
+        const gainValue = document.getElementById('gainValue');
+
         let localStream;
         let pc;
+        let isMuted = false;
         
-        // GoogleのSTUNサーバーを利用
-        const config = { 
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
-        };
+        // 音量ブースト用変数
+        let audioCtx;
+        let gainNode;
+        let sourceNode;
 
-        // 【重要】SDPを書き換えて高音質ステレオを強制する関数
+        const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
         function forceStereo(sdp) {
-            // maxaveragebitrate=510000 -> 510kbps (超高音質)
-            // stereo=1 -> ステレオ強制
-            // sprop-maxcapturerate=48000 -> 48kHzサンプリング
-            // usedtx=0 -> 音声途切れ防止
             let fmtp = "useinbandfec=1; stereo=1; maxaveragebitrate=510000; sprop-maxcapturerate=48000; usedtx=0";
             return sdp.replace(/useinbandfec=1/g, fmtp);
         }
 
-// マイク初期化（自動フォールバック機能付き）
+        // --- 音量ブースト・オーディオ設定 ---
+        function setupAudioBoost(stream) {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            // 既存の接続があれば一度切断
+            if (sourceNode) sourceNode.disconnect();
+            
+            sourceNode = audioCtx.createMediaStreamSource(stream);
+            gainNode = audioCtx.createGain();
+            
+            gainNode.gain.value = gainRange.value; // スライダーの値を適用
+            
+            sourceNode.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            // audioタグ自体はミュートにして、Web Audioの音だけ出す（二重防止）
+            remoteAudio.srcObject = stream;
+            remoteAudio.muted = true;
+        }
+
+        // スライダー操作時
+        gainRange.oninput = () => {
+            gainValue.innerText = gainRange.value;
+            if (gainNode) gainNode.gain.value = gainRange.value;
+        };
+
+        // --- ミュート機能 ---
+        muteBtn.onclick = () => {
+            isMuted = !isMuted;
+            localStream.getAudioTracks()[0].enabled = !isMuted;
+            muteBtn.innerText = isMuted ? "マイクOFF中" : "マイクON";
+            muteBtn.style.background = isMuted ? "#555" : "#ffa500";
+        };
+
+        // --- 通話終了機能 ---
+        hangupBtn.onclick = () => {
+            stopCall();
+            socket.emit('hangup');
+        };
+
+        function stopCall() {
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            statusDiv.innerText = "通話を終了しました";
+            startBtn.disabled = false;
+            hangupBtn.disabled = true;
+        }
+
+        socket.on('hangup', () => {
+            stopCall();
+        });
+
+        // --- WebRTC基本処理 ---
         async function init() {
             try {
-                // まずは「最高音質」を目指してリクエスト
                 localStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
-                        echoCancellation: false, 
-                        noiseSuppression: false, 
+                        echoCancellation: false,
+                        noiseSuppression: false,
                         autoGainControl: false,
-                        // 'ideal' を使うと「できればこうしたいけど、無理なら合わせるよ」という指示になる
-                        channelCount: { ideal: 2 }, 
-                        sampleRate: { ideal: 48000 } 
+                        channelCount: { ideal: 2 },
+                        sampleRate: { ideal: 48000 }
                     }
                 });
-                
                 statusDiv.innerText = "準備OK！(高音質モード)";
-                statusDiv.style.color = "#00ff00"; // 緑色
-                startBtn.disabled = false; // ボタンを有効化
-
+                startBtn.disabled = false;
             } catch (err) {
-                console.warn("高音質モード失敗。標準設定で再試行します...", err);
-                
-                // 高音質がダメなら、標準設定で再トライ（とにかく繋ぐことを優先）
-                try {
-                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    statusDiv.innerText = "準備OK (標準モード)";
-                    statusDiv.style.color = "orange";
-                    startBtn.disabled = false; // ボタンを有効化
-                } catch (finalErr) {
-                    statusDiv.innerText = "エラー: マイクが見つからないか、許可されていません。";
-                    statusDiv.style.color = "red";
-                    console.error("マイク取得エラー:", finalErr);
-                }
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                statusDiv.innerText = "準備OK (標準モード)";
+                startBtn.disabled = false;
             }
         }
 
-        
-
-        // 通信の確立処理
         function createPeerConnection() {
             pc = new RTCPeerConnection(config);
-
-            pc.onicecandidate = (e) => {
-                if (e.candidate) socket.emit('candidate', e.candidate);
-            };
-
+            pc.onicecandidate = (e) => { if (e.candidate) socket.emit('candidate', e.candidate); };
             pc.ontrack = (e) => {
-                console.log("相手の音声を受信");
-                statusDiv.innerText = "通話中 (High-Res Stereo)";
-                remoteAudio.srcObject = e.streams[0];
+                statusDiv.innerText = "通話中 (Stereo + Boost)";
+                setupAudioBoost(e.streams[0]);
+                hangupBtn.disabled = false;
             };
-
             localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
         }
 
-        // 発信ボタン
         startBtn.onclick = async () => {
+            if (audioCtx) audioCtx.resume(); // ブラウザ制限解除
             if (!pc) createPeerConnection();
             const offer = await pc.createOffer();
-            
-            // ここでSDP書き換え実行
             offer.sdp = forceStereo(offer.sdp);
-            
             await pc.setLocalDescription(offer);
             socket.emit('offer', offer);
             statusDiv.innerText = "呼び出し中...";
             startBtn.disabled = true;
         };
 
-        // 着信処理
         socket.on('offer', async (offer) => {
+            if (audioCtx) audioCtx.resume();
             if (!pc) createPeerConnection();
-            statusDiv.innerText = "着信あり！接続中...";
-            
             await pc.setRemoteDescription(new RTCSessionDescription(offer));
             const answer = await pc.createAnswer();
-            
-            // 返答側もSDP書き換え実行
             answer.sdp = forceStereo(answer.sdp);
-            
             await pc.setLocalDescription(answer);
             socket.emit('answer', answer);
         });
 
         socket.on('answer', async (answer) => {
             await pc.setRemoteDescription(new RTCSessionDescription(answer));
-            statusDiv.innerText = "接続完了！";
         });
 
         socket.on('candidate', async (candidate) => {
             if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
         });
-socket.on('candidate', async (candidate) => {
-            if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        });
 
-        // この一行が足りなかったためにマイクが起動していませんでした
         init();
     </script>
 </body>
 </html>
-
-
-
