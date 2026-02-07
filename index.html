@@ -34,16 +34,24 @@
         }
 
         // 起動時にマイクを準備
-        async function init() {
+      async function init() {
             try {
+                // まずは一般的な設定でマイクを要求
                 localStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2 }
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                        // channelCountはあえてここでは指定せず、後で適用する
+                    }
                 });
-                statusDiv.innerText = "準備完了。相手を待つか、通話を開始してください。";
+                
+                statusDiv.innerText = "準備完了。通話を開始してください。";
                 startBtn.disabled = false;
+                console.log("Microphone access granted:", localStream.getAudioTracks()[0].getSettings());
             } catch (err) {
-                statusDiv.innerText = "エラー: マイクにアクセスできません。";
-                console.error(err);
+                statusDiv.innerText = "エラー: マイクが見つからないか許可されていません。";
+                console.error("Mic Error:", err);
             }
         }
 
@@ -95,3 +103,4 @@
     </script>
 </body>
 </html>
+
