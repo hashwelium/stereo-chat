@@ -1,136 +1,67 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Stereo Call</title>
-<style>
-body {
-  margin:0;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background: linear-gradient(135deg,#1e1e2f,#12121a);
-  color:white;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  height:100vh;
-}
-.card{
-  width:340px;
-  background:#1f1f2e;
-  border-radius:18px;
-  padding:24px;
-  box-shadow:0 10px 30px rgba(0,0,0,.5);
-  text-align:center;
-}
-h1{font-size:20px;margin-bottom:8px;}
-.status{opacity:.7;font-size:14px;margin-bottom:12px;}
-.timer{font-size:28px;margin:12px 0;font-weight:bold;}
-button{
-  width:100%;
-  padding:12px;
-  border:none;
-  border-radius:12px;
-  font-size:16px;
-  margin-top:8px;
-  cursor:pointer;
-}
-.start{background:#4CAF50;color:white;}
-.stop{background:#e53935;color:white;}
-textarea{
-  width:100%;
-  height:80px;
-  margin-top:8px;
-  border-radius:10px;
-  border:none;
-  padding:8px;
-  font-size:12px;
-}
-</style>
+    <title>Stereo P2P Call</title>
+    <style>body { font-family: sans-serif; text-align: center; padding: 20px; }</style>
 </head>
 <body>
-<div class="card">
-  <h1>🎧 Stereo Voice Call</h1>
-  <div class="status" id="status">待機中</div>
-  <div class="timer" id="timer">00:00</div>
-  <button class="start" onclick="startCall()">通話開始</button>
-  <button class="stop" onclick="endCall()">終了</button>
-  <textarea id="offer" placeholder="Offer / Answer貼り付け"></textarea>
-</div>
+    <h1>Stereo WebRTC Call</h1>
+    <button id="startBtn">通話開始 (Start Call)</button>
+    <audio id="remoteAudio" autoplay controls></audio>
 
-<script>
-let pc, localStream, timerInterval, seconds=0;
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const startBtn = document.getElementById('startBtn');
+        const remoteAudio = document.getElementById('remoteAudio');
+        let pc;
 
-function updateTimer(){
-  seconds++;
-  const m = String(Math.floor(seconds/60)).padStart(2,'0');
-  const s = String(seconds%60).padStart(2,'0');
-  document.getElementById("timer").textContent = `${m}:${s}`;
-}
+        // ステレオを強制するマジック
+        function forceStereo(sdp) {
+            return sdp.replace('useinbandfec=1', 'useinbandfec=1;stereo=1;maxaveragebitrate=128000');
+        }
 
-function enableStereo(sdp){
-  return sdp.replace(
-    /a=fmtp:111 minptime=10;useinbandfec=1/g,
-    "a=fmtp:111 minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1"
-  );
-}
+        async function start() {
+            pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
 
-async function startCall(){
-  document.getElementById("status").textContent="マイク取得中…";
+            pc.onicecandidate = (e) => {
+                if (e.candidate) socket.emit('candidate', e.candidate);
+            };
 
-  localStream = await navigator.mediaDevices.getUserMedia({
-    audio:{
-      channelCount:2,
-      sampleRate:48000,
-      echoCancellation:false,
-      noiseSuppression:false,
-      autoGainControl:false
-    }
-  });
+            pc.ontrack = (e) => {
+                remoteAudio.srcObject = e.streams[0];
+            };
 
-  pc = new RTCPeerConnection();
-  localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: false, noiseSuppression: false, channelCount: 2 }
+            });
+            
+            stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-  pc.ontrack = e=>{
-    const audio = new Audio();
-    audio.srcObject = e.streams[0];
-    audio.play();
-  };
+            const offer = await pc.createOffer();
+            offer.sdp = forceStereo(offer.sdp);
+            await pc.setLocalDescription(offer);
+            socket.emit('offer', offer);
+        }
 
-  pc.onconnectionstatechange=()=>{
-    document.getElementById("status").textContent="接続状態: "+pc.connectionState;
-    if(pc.connectionState==="connected"){
-      timerInterval=setInterval(updateTimer,1000);
-    }
-  };
+        socket.on('offer', async (offer) => {
+            if (!pc) await start();
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            answer.sdp = forceStereo(answer.sdp);
+            await pc.setLocalDescription(answer);
+            socket.emit('answer', answer);
+        });
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription({type:"offer", sdp: enableStereo(offer.sdp)});
-  document.getElementById("offer").value = JSON.stringify(pc.localDescription);
-  document.getElementById("status").textContent="Offer生成 → 相手へ送信";
-}
+        socket.on('answer', async (answer) => {
+            await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        });
 
-async function setRemote(){
-  const data = JSON.parse(document.getElementById("offer").value);
-  await pc.setRemoteDescription(data);
+        socket.on('candidate', async (candidate) => {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        });
 
-  if(data.type==="offer"){
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription({type:"answer", sdp: enableStereo(answer.sdp)});
-    document.getElementById("offer").value = JSON.stringify(pc.localDescription);
-    document.getElementById("status").textContent="Answer生成 → 返送";
-  }
-}
-
-document.getElementById("offer").addEventListener("change", setRemote);
-
-function endCall(){
-  if(pc) pc.close();
-  clearInterval(timerInterval);
-  seconds=0;
-  document.getElementById("timer").textContent="00:00";
-  document.getElementById("status").textContent="終了";
-}
-</script>
+        startBtn.onclick = start;
+    </script>
 </body>
 </html>
