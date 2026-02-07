@@ -5,7 +5,7 @@
 <audio id="remoteAudio" autoplay></audio>
 
 <script>
-const ws = new WebSocket("wss://stereo-chat.onrender.com");
+const ws = new WebSocket("https://stereo-chat.onrender.com");
 let pc;
 
 async function startCall() {
@@ -37,3 +37,4 @@ ws.onmessage = async msg => {
 </script>
 </body>
 </html>
+
