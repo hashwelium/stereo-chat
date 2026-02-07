@@ -52,31 +52,39 @@
             return sdp.replace(/useinbandfec=1/g, fmtp);
         }
 
-        // マイク初期化（高音質設定）
+// マイク初期化（自動フォールバック機能付き）
         async function init() {
             try {
+                // まずは「最高音質」を目指してリクエスト
                 localStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
-                        echoCancellation: false, // エコー除去OFF（音質優先）
-                        noiseSuppression: false, // ノイズ除去OFF
-                        autoGainControl: false,  // 音量自動調整OFF
-                        channelCount: 2,
-                        sampleRate: 48000,
-                        sampleSize: 16
+                        echoCancellation: false, 
+                        noiseSuppression: false, 
+                        autoGainControl: false,
+                        // 'ideal' を使うと「できればこうしたいけど、無理なら合わせるよ」という指示になる
+                        channelCount: { ideal: 2 }, 
+                        sampleRate: { ideal: 48000 } 
                     }
                 });
                 
-                statusDiv.innerText = "準備OK！イヤホンをして通話開始してください。";
-                startBtn.disabled = false;
-                
-                // 設定確認用ログ
-                const track = localStream.getAudioTracks()[0];
-                console.log("マイク設定:", track.getSettings());
+                statusDiv.innerText = "準備OK！(高音質モード)";
+                statusDiv.style.color = "#00ff00"; // 緑色
+                startBtn.disabled = false; // ボタンを有効化
 
             } catch (err) {
-                statusDiv.innerText = "エラー: マイクが使えません。";
-                statusDiv.style.color = "red";
-                console.error(err);
+                console.warn("高音質モード失敗。標準設定で再試行します...", err);
+                
+                // 高音質がダメなら、標準設定で再トライ（とにかく繋ぐことを優先）
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    statusDiv.innerText = "準備OK (標準モード)";
+                    statusDiv.style.color = "orange";
+                    startBtn.disabled = false; // ボタンを有効化
+                } catch (finalErr) {
+                    statusDiv.innerText = "エラー: マイクが見つからないか、許可されていません。";
+                    statusDiv.style.color = "red";
+                    console.error("マイク取得エラー:", finalErr);
+                }
             }
         }
 
@@ -134,3 +142,4 @@
         socket.on('candidate', async (candidate) => {
             if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
         });
+
