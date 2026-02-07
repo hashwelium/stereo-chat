@@ -19,7 +19,8 @@
 
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
-        const socket = io();
+        // あなたの Render の URL に書き換えてください（最後はスラッシュなし
+        const socket = io("https://stereo-chat.onrender.com");
         const startBtn = document.getElementById('startBtn');
         const statusDiv = document.getElementById('status');
         const remoteAudio = document.getElementById('remoteAudio');
@@ -106,6 +107,7 @@
     </script>
 </body>
 </html>
+
 
 
 
